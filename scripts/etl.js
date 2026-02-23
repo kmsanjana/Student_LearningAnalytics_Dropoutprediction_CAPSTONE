@@ -1,9 +1,14 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { Pool } = require('pg');
 const fs = require('fs');
 const csv = require('csv-parser');
 const path = require('path');
 
-const prisma = new PrismaClient();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 async function readCSV(filePath) {
   return new Promise((resolve, reject) => {
@@ -43,7 +48,7 @@ async function loadCourses() {
   console.log('Loading courses...');
   const dataPath = path.join(__dirname, '../data/courses.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   for (const row of data) {
     await prisma.course.upsert({
@@ -72,13 +77,13 @@ async function loadStudentInfo() {
   console.log('Loading student info...');
   const dataPath = path.join(__dirname, '../data/studentInfo.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   const batchSize = 500;
-  
+
   for (let i = 0; i < data.length; i += batchSize) {
     const batch = data.slice(i, i + batchSize);
-    
+
     await prisma.$transaction(
       batch.map((row) =>
         prisma.studentInfo.upsert({
@@ -107,7 +112,7 @@ async function loadStudentInfo() {
         })
       )
     );
-    
+
     count += batch.length;
     console.log(`  Loaded ${count} student info records...`);
   }
@@ -118,13 +123,13 @@ async function loadStudentRegistration() {
   console.log('Loading student registrations...');
   const dataPath = path.join(__dirname, '../data/studentRegistration.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   const batchSize = 500;
-  
+
   for (let i = 0; i < data.length; i += batchSize) {
     const batch = data.slice(i, i + batchSize);
-    
+
     await prisma.$transaction(
       batch.map((row) =>
         prisma.studentRegistration.upsert({
@@ -146,7 +151,7 @@ async function loadStudentRegistration() {
         })
       )
     );
-    
+
     count += batch.length;
     console.log(`  Loaded ${count} student registrations...`);
   }
@@ -157,7 +162,7 @@ async function loadAssessments() {
   console.log('Loading assessments...');
   const dataPath = path.join(__dirname, '../data/assessments.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   for (const row of data) {
     await prisma.assessment.upsert({
@@ -186,13 +191,13 @@ async function loadStudentAssessment() {
   console.log('Loading student assessments...');
   const dataPath = path.join(__dirname, '../data/studentAssessment.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   const batchSize = 1000;
-  
+
   for (let i = 0; i < data.length; i += batchSize) {
     const batch = data.slice(i, i + batchSize);
-    
+
     await prisma.$transaction(
       batch.map((row) =>
         prisma.studentAssessment.upsert({
@@ -213,7 +218,7 @@ async function loadStudentAssessment() {
         })
       )
     );
-    
+
     count += batch.length;
     console.log(`  Loaded ${count} student assessments...`);
   }
@@ -224,13 +229,13 @@ async function loadVle() {
   console.log('Loading VLE...');
   const dataPath = path.join(__dirname, '../data/vle.csv');
   const data = await readCSV(dataPath);
-  
+
   let count = 0;
   const batchSize = 500;
-  
+
   for (let i = 0; i < data.length; i += batchSize) {
     const batch = data.slice(i, i + batchSize);
-    
+
     await prisma.$transaction(
       batch.map((row) =>
         prisma.vle.upsert({
@@ -249,7 +254,7 @@ async function loadVle() {
         })
       )
     );
-    
+
     count += batch.length;
     console.log(`  Loaded ${count} VLE records...`);
   }
@@ -259,30 +264,24 @@ async function loadVle() {
 async function loadStudentVle() {
   console.log('Loading student VLE interactions...');
   const dataPath = path.join(__dirname, '../data/studentVle.csv');
-  const data = await readCSV(dataPath);
-  
-  console.log(`Total student VLE records in CSV: ${data.length}`);
-  console.log('Processing with chunk-based aggregation...');
-  
+
   let count = 0;
-  const chunkSize = 50000; // Process 50k records at a time
-  const batchSize = 1000;  // Insert 1k at a time
-  
-  for (let chunkStart = 0; chunkStart < data.length; chunkStart += chunkSize) {
-    const chunk = data.slice(chunkStart, chunkStart + chunkSize);
-    
-    // Aggregate within this chunk
+  let totalRows = 0;
+  const chunkSize = 50000;
+  const batchSize = 500;
+  let buffer = [];
+
+  async function processChunk(chunk) {
     const aggregatedMap = new Map();
-    
+
     for (const row of chunk) {
       const date = parseIntValue(row.date);
       if (date === null) continue;
-      
+
       const key = `${row.code_module}|${row.code_presentation}|${row.id_student}|${row.id_site}|${date}`;
-      
+
       if (aggregatedMap.has(key)) {
-        const existing = aggregatedMap.get(key);
-        existing.sumClick += parseIntValue(row.sum_click) || 0;
+        aggregatedMap.get(key).sumClick += parseIntValue(row.sum_click) || 0;
       } else {
         aggregatedMap.set(key, {
           codeModule: row.code_module,
@@ -294,13 +293,13 @@ async function loadStudentVle() {
         });
       }
     }
-    
+
     const aggregatedData = Array.from(aggregatedMap.values());
-    
-    // Insert aggregated chunk in batches
+    aggregatedMap.clear();
+
     for (let i = 0; i < aggregatedData.length; i += batchSize) {
       const batch = aggregatedData.slice(i, i + batchSize);
-      
+
       await prisma.$transaction(
         batch.map((record) =>
           prisma.studentVle.upsert({
@@ -320,24 +319,37 @@ async function loadStudentVle() {
           })
         )
       );
-      
+
       count += batch.length;
-      if (count % 10000 === 0) {
-        console.log(`  Processed ${count} unique student VLE interactions...`);
-      }
     }
-    
-    // Clear map to free memory
-    aggregatedMap.clear();
+    console.log(`  Processed ${count} unique interactions (${totalRows} CSV rows read so far)`);
   }
-  
-  console.log(`✓ Loaded ${count} student VLE interactions`);
+
+  const stream = fs.createReadStream(dataPath).pipe(csv());
+
+  for await (const row of stream) {
+    buffer.push(row);
+    totalRows++;
+    if (buffer.length >= chunkSize) {
+      await processChunk(buffer);
+      buffer = [];
+      if (global.gc) global.gc();
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.length > 0) {
+    await processChunk(buffer);
+    buffer = [];
+  }
+
+  console.log(`✓ Loaded ${count} student VLE interactions (from ${totalRows} CSV rows)`);
 }
 
 async function main() {
   try {
     console.log('Starting ETL process...\n');
-    
+
     await loadCourses();
     await loadStudentInfo();
     await loadStudentRegistration();
@@ -345,7 +357,7 @@ async function main() {
     await loadStudentAssessment();
     await loadVle();
     await loadStudentVle();
-    
+
     console.log('\n✓ ETL process completed successfully!');
   } catch (error) {
     console.error('Error during ETL process:', error);
