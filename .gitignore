@@ -1,0 +1,16 @@
+# Data files
+Data/
+data/
+
+# Environment variables
+.env
+
+# Dependencies
+node_modules/
+
+# Prisma
+prisma/migrations/
+
+# OS files
+.DS_Store
+Thumbs.db
