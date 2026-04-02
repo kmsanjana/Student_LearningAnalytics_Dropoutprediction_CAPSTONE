@@ -1,229 +1,223 @@
-# Student Learning Analytics & Dropout Prediction
-### Open University Learning Analytics Dataset (OULAD)
+# Student Dropout Prediction & Early Warning System
+### OULAD Learning Analytics Dashboard — GWU Data Science Capstone 2026
 
-> **Goal:** Understand, predict, and ultimately reduce student dropout in online higher education using the Open University Learning Analytics Dataset — covering 32,593 student enrollments, 8.4 million VLE interaction events, and 173,912 assessment submissions across 7 modules.
+> **Interactive HTML dashboard for predicting and explaining student dropout risk in online higher education using the Open University Learning Analytics Dataset (OULAD).**
 
----
-
-## Project Phases
-
-| Phase | Status | Description |
-|---|---|---|
-| [Phase 0](#phase-0--data-infrastructure--schema-design) | ✅ Complete | Data infrastructure & PostgreSQL schema |
-| [Phase 1](#phase-1--data-cleaning--exploratory-data-analysis) | ✅ Complete | Data cleaning & professional EDA |
-| [Phase 2](#phase-2--feature-engineering--dropout-prediction) | 🔜 Upcoming | Feature engineering & predictive modelling |
-| [Phase 3](#phase-3--time-series-forecasting-of-learning-behaviour) | 🔜 Upcoming | Time-series forecasting of learning behaviour |
-| [Phase 4](#phase-4--interactive-dashboard) | 🔜 Upcoming | Interactive dashboard for educators |
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![LightGBM](https://img.shields.io/badge/LightGBM-0.9412_AUC-green.svg)](https://lightgbm.readthedocs.io/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-Live_HTML-orange.svg)](dashboard.html)
 
 ---
 
-## Dataset
+## 🎯 Project Overview
 
-**Source:** [Open University Learning Analytics Dataset (OULAD)](https://www.nature.com/articles/sdata2017171)
+This capstone project delivers a **dual-layer early warning system** combining:
+1. **LightGBM predictive model** (AUC-ROC 0.9412) — identifies *who* is at risk
+2. **Rule-based flagging system** (5 statistically-validated indicators) — explains *why* in actionable terms
 
-| Table | Rows | Description |
-|---|---|---|
-| `studentInfo` | 32,593 | Student demographics & final outcome |
-| `studentRegistration` | 32,593 | Registration & unregistration dates |
-| `assessments` | 206 | Assessment metadata (type, weight, due date) |
-| `studentAssessment` | 173,912 | Student submission scores |
-| `vle` | 6,364 | Virtual Learning Environment resource metadata |
-| `studentVle` | 8,459,320 | Raw VLE click-event logs |
-| `courses` | 22 | Module presentation details (7 modules) |
+The system analyzes **32,593 student enrollments** across 7 modules, processing **8.4M VLE interaction events** and **173,912 assessment submissions** to predict dropout with high accuracy while maintaining interpretability for academic advisors.
 
----
-
-## Phase 0 — Data Infrastructure & Schema Design
-
-**Scripts:** [`scripts/etl.js`](scripts/etl.js) 
-**ORM:** Prisma (`prisma/schema.prisma`) with PostgreSQL adapter
-
-### What We Did
-- Designed a relational schema for all 7 OULAD tables preserving foreign key relationships
-- Loaded all CSV files into a **PostgreSQL** database via a Node.js ETL pipeline (`scripts/etl.js`)
-- Validated referential integrity across tables (student ↔ registration ↔ assessments ↔ VLE)
-- Created an Entity Relationship Diagram (ERD) documenting all table relationships
-
-### studentVle — Chunked Load with Date-Level Aggregation
-The raw `studentVle.csv` (8.4M rows, 453 MB) required special handling:
-- Streamed and processed in **chunks of 10,000–50,000 rows** to avoid memory overflow
-- Within each chunk, rows were **aggregated by `codeModule × codePresentation × idStudent × idSite × date`** — summing `sumClick` for any duplicate entries sharing the same student–site–day key
-- Upserted into PostgreSQL with `ON CONFLICT ... DO UPDATE SET sumClick = sumClick + EXCLUDED.sumClick` to correctly accumulate clicks across chunk boundaries
-- A dedicated script (`scripts/load_student_vle.js`) was written using raw SQL for performance, bypassing the Prisma ORM overhead for this high-volume table
-
-This means the `studentVle` table in PostgreSQL stores **one row per student × VLE resource × day**, with `sumClick` representing the total clicks for that student on that resource on that day.
-
-### Schema Highlights
-- Primary keys: `idStudent × codeModule × codePresentation` (composite) for student-level tables
-- `assessments.idAssessment` → `studentAssessment.idAssessment`
-- `vle.idSite` → `studentVle.idSite`
-- `studentVle` composite key: `codeModule × codePresentation × idStudent × idSite × date`
-- All date fields stored as integers relative to course start day (Day 0)
-
-**ERD:** See [`ERD.png`](ERD.png)
+### Key Deliverables
+- ✅ **Interactive HTML Dashboard** — 7 tabs covering risk monitoring, ML models, SHAP explainability, clustering, and module analytics
+- ✅ **Validated Early Warning Flags** — 5 binary indicators (all p < 0.001) with precision/recall metrics
+- ✅ **SHAP Explainability** — top-5 feature drivers per student, aligned with rule-based flags
+- ✅ **Student Clustering** — K=4 behavioral profiles with outcome validation
+- ✅ **Model Comparison** — Logistic Regression, Random Forest, XGBoost, LightGBM benchmarked
 
 ---
 
-## Phase 1 — Data Cleaning & Exploratory Data Analysis
+## 📊 Dashboard Preview
 
-**Notebook:** [`notebooks/oulad_phase1_eda.ipynb`](notebooks/oulad_phase1_eda.ipynb)  
-**Report:** [`Docs/Phase1_DataCleaning_EDA_Report.md`](Docs/Phase1_DataCleaning_EDA_Report.md)
-
-> Loads all data from the **PostgreSQL database** built in Phase 0 via SQLAlchemy (`postgresql://localhost:5432/oulad`). Requires the DB to be running locally.  
-> `studentVle` (8.4M rows) is queried in chunks of 500,000 rows to avoid memory overflow.
-
-### Data Cleaning Decisions
-
-| Field | Issue | Action |
-|---|---|---|
-| `imdBand` | 3.4% missing | Filled with `'Unknown'` — admin gap, preserve rows |
-| `dateRegistration` | 0.14% missing | Filled with median — trivially small gap |
-| `dateUnregistration` | 69% null | **Kept as NaN** — null means still enrolled, not missing |
-| `assessments.date` | 5.3% missing | Module-level median fill — used only for timing |
-| `studentAssessment.score` | 0.1% missing | Rows dropped — score is dependent variable |
-
-### studentVle — EDA-Level Aggregations
-
-Since `studentVle` is a raw click-event log (one row per student × resource × day), two aggregations were computed in the notebook for analysis:
-
-**1. Full-course engagement per student** (Section 9 — VLE Engagement Analysis)  
-Grouped by `idStudent × codeModule × codePresentation`, computed:
-- `total_clicks` — total VLE clicks across the entire course
-- `active_days` — number of distinct days the student accessed the VLE
-- `first_day` / `last_day` — earliest and latest interaction dates
-- `activity_span` — `last_day − first_day` (days of sustained engagement)
-
-Saved to: `notebooks/processed/student_vle_aggregated.csv`
-
-**2. First-week engagement per student** (Section 9 — Early Warning Analysis)  
-Filtered to **days 0–7** (first week of course), then grouped by `idStudent × codeModule × codePresentation`:
-- `first_week_clicks` — total clicks in the first 7 days
-- `first_week_days` — number of active days in the first week
-
-This was used as an **early dropout warning signal** — ~55% of Withdrawn students had zero first-week VLE activity.  
-Saved to: `notebooks/processed/student_vle_first_week.csv`
-
-### Key Insights
-
-#### Outcomes
-- **31.2% of students withdraw** — the primary challenge for this project
-- Only **47.2%** of enrollments result in Pass or Distinction
-- Withdrawal rates vary significantly by module (range: ~20% to ~45%)
-
-#### Demographics
-- **Previous attempts** is the strongest demographic predictor — students with 2+ prior attempts have 55%+ dropout rates
-- **IMD Band (deprivation):** Most-deprived students (0–10%) withdraw at 37% vs 24% for least-deprived — a 13-point socioeconomic gap
-- **Education level:** Students with no formal qualifications withdraw at ~2× the rate of postgraduates
-- **Registration timing:** Late registrants (after course start) show the highest dropout rates (~45%)
-
-#### Assessment Behaviour
-- Distinction students score a median of **91/100**; Withdrawn students median **70/100**
-- **Late submission rate** for Withdrawn students is ~3× higher than Distinction students
-- Bimodal score distribution for Withdrawn students — some scored well but still left
-
-#### VLE Engagement
-- **Distinction students generate 5× more clicks** than Withdrawn students
-- **First-week VLE activity** is the strongest early warning signal:
-  - ~55% of Withdrawn students had **zero VLE activity in Week 1**
-  - vs only ~8% of Distinction students
-- **Forum participation** (`forumng`) is disproportionately high among Distinction students
-- Resources and subpages dominate overall click volume
-
-#### Critical Dropout Windows
-- **25% of withdrawals** happen before the course even starts (Day < 0)
-- **50% of withdrawals** happen before **Day 27** (end of Week 4)
-- **75% of withdrawals** happen before Day 109 (Week 16)
-- → **Week 1–4 is the critical intervention window**
-
-#### Statistical Validation
-- All categorical predictors (gender, age, education, IMD, region, disability, previous attempts) are **statistically significant** vs outcome (chi-square, p < 0.001)
-- All continuous predictors (VLE clicks, active days, assessment scores, first-week engagement, registration day) are **statistically significant** vs dropout (Mann-Whitney U, p < 0.001)
-
-### Outputs
-All saved to `notebooks/processed/`:
-- `student_master_cleaned.csv` — main cleaned student dataset
-- `student_vle_aggregated.csv` — per-student VLE totals
-- `student_vle_first_week.csv` — first-week engagement metrics
-- `assessment_scores_merged.csv` — scores merged with metadata
-- 18 publication-quality figures (PNG)
+The dashboard provides:
+- **Overview Tab** — 5 KPIs, outcome distribution, cohort-level metrics
+- **ML Models Tab** — ROC curves, metrics comparison, model performance table
+- **Students Tab** — Top 1,000 high-risk students with search/filter, drill-down SHAP panels
+- **Risk Flags Tab** — Dual-layer architecture explanation, statistical validation table, SHAP-rule alignment
+- **SHAP Explainability Tab** — Global feature importance + per-student breakdowns
+- **Clusters Tab** — 4 behavioral segments with engagement scatter plot
+- **Modules Tab** — Course-level dropout rates and risk concentration
 
 ---
 
-## Phase 2 — Feature Engineering & Dropout Prediction
+## 🚀 Quick Start
 
-**Status:** 🔜 Upcoming  
-**Planned notebook:** `notebooks/oulad_phase2_modelling.ipynb`
+### Prerequisites
+```bash
+pip install pandas numpy scikit-learn lightgbm xgboost shap matplotlib seaborn
+```
 
-### Planned Approach
-- Engineer engagement trajectory features (weekly click bins, running assessment averages, score trends)
-- Build composite risk scores combining IMD band, previous attempts, and early engagement
-- Train and evaluate multiple classifiers:
-  - Logistic Regression (baseline)
-  - Random Forest & Gradient Boosting (XGBoost, LightGBM)
-  - Survival Analysis (Cox Proportional Hazards) for time-to-withdrawal
-- Target variables: `is_dropout` (binary) and `finalResult` (4-class)
-- Evaluation: ROC-AUC, F1, Precision-Recall, Brier Score (for calibration)
-- Explainability: SHAP values for feature importance
+### Generate Dashboard (3 Steps)
 
----
+```bash
+# Step 1: Generate student features + clustering
+python generate_data.py
 
-## Phase 3 — Time-Series Forecasting of Learning Behaviour
+# Step 2: Generate ML model results + ROC curves
+python generate_model_results.py
 
-**Status:** 🔜 Upcoming  
-**Planned notebook:** `notebooks/oulad_phase3_timeseries.ipynb`
+# Step 3: Build dashboard HTML
+python build_dashboard.py
+```
 
-### Planned Approach
-- Aggregate `studentVle` into weekly engagement sequences per student
-- Model learning trajectories using:
-  - LSTM / Temporal CNN for sequence-based dropout prediction
-  - ARIMA / Prophet for cohort-level engagement forecasting
-- Early-warning trigger design: flag at-risk students by Week 3–4 (before 50% of withdrawals occur)
-- Investigate whether engagement trajectory shape (rising, declining, flat) predicts outcome independently of total volume
+**Output:** `dashboard.html` (1.2 MB self-contained file — open in any browser)
 
 ---
 
-## Phase 4 — Interactive Dashboard
-
-**Status:** 🔜 Upcoming
-
-### Planned Features
-- **At-risk student monitor** — ranked list updated weekly, exportable for advisor outreach
-- **Module health overview** — dropout rates, engagement trends, assessment pass rates per module
-- **Individual student timeline** — VLE activity, assessment submissions, and outcome prediction
-- **Cohort comparison** — slice by IMD band, education level, module, or presentation period
-- **Stack:** Streamlit (Python) or Power BI
-
----
-
-## Repository Structure
+## 📁 Repository Structure
 
 ```
-├── data/                          # Raw OULAD CSV files (not tracked in git)
+├── build_dashboard.py              # Main dashboard builder (HTML generator)
+├── prepare_dashboard_data.py       # Aggregates processed CSVs → dashboard_data.json
+├── generate_data.py                # Feature engineering + clustering pipeline
+├── generate_model_results.py       # Trains 4 models + computes SHAP + ROC curves
+│
+├── Data/                           # Raw OULAD CSVs (not tracked — download separately)
 │   ├── studentInfo.csv
 │   ├── studentRegistration.csv
 │   ├── assessments.csv
 │   ├── studentAssessment.csv
 │   ├── vle.csv
-│   ├── studentVle.csv             # 453 MB — 8.4M rows
+│   ├── studentVle.csv             # 8.4M rows, 453 MB
 │   └── courses.csv
 │
-├── notebooks/
-│   ├── oulad_phase1_eda.ipynb     # ✅ Phase 1 — Cleaning & EDA (42 cells)
-│   └── processed/                 # Cleaned CSVs & figures (auto-generated)
+├── processed/                      # Generated by pipeline (gitignored)
+│   ├── student_features_clustered.csv
+│   ├── dashboard_data.json
+│   ├── model_results.json
+│   └── shap_importance.csv
 │
-├── Docs/
-│   └── Phase1_DataCleaning_EDA_Report.md
+├── Docs/                           # Reports and presentations
+│   ├── Midterm_Report.md
+│   ├── Midterm_Presentation.md
+│   └── ...
 │
-├── scripts/                       # Phase 0 — DB loading scripts
-├── prisma/                        # Prisma ORM schema
-├── ERD.png                        # Entity Relationship Diagram
-└── README.md
+├── Feedback/                       # Professor evaluations
+│   ├── Group3_Evaluation_Mar22_2026.pdf
+│   ├── Group3_Evaluation_Mar29_2026.pdf
+│   └── capstone_group3_evaluation.pdf
+│
+├── oulad_phase1_eda.ipynb         # Phase 1 EDA notebook
+├── README.md                       # Original project README
+└── dashboard.html                  # Final deliverable (regenerated by build_dashboard.py)
+```
 
 ---
 
-```
-## Contributers - GWU Data Science Capstone 2026
+## 🧠 Methodology
 
-- **Aditya Kanbargi - MS Data Science, GWU**
-- **Sanjana Kadambe Muralidhar - MS Data Science, GWU**
+### Dual-Layer Early Warning Architecture
 
+**Layer 1: LightGBM Predictive Model**
+- Trained on 32,593 OULAD enrollments (80/20 split)
+- AUC-ROC: **0.9412** | F1-Score: **0.7984** | Precision: **79.8%** | Recall: **80.2%**
+- Class-weighted to handle 31.2% dropout imbalance
+- 28 engineered features (engagement, assessment, demographic, temporal)
+
+**Layer 2: Rule-Based Early Warning Flags**
+- 5 binary indicators derived from Phase 1 EDA findings
+- Each threshold calibrated against observed outcome differences
+- All flags independently validated: **p < 0.001** (Chi-square / Mann-Whitney U)
+- Composite risk score = simple sum (0–5), fully explainable to advisors
+
+### Why Two Layers?
+A pure ML probability score tells an advisor nothing actionable. The rule-based layer translates predictions into specific observable behaviors advisors can act on. SHAP analysis confirms both layers identify the same underlying drivers.
+
+---
+
+## 📈 Key Findings
+
+### Early Warning Validation (Applied to Full OULAD Dataset)
+
+| Risk Threshold | Students Flagged | Precision | Recall | Use Case |
+|---|---|---|---|---|
+| **Score ≥ 1** | 12,593 (38.6%) | 52.9% | 65.6% | Broad outreach campaigns |
+| **Score ≥ 2** ⭐ | 5,635 (17.3%) | **77.4%** | **43.0%** | **Recommended threshold (best F1)** |
+| **Score ≥ 3** | 747 (2.3%) | 79.3% | 5.8% | Urgent intervention cases |
+
+### Individual Flag Performance
+
+| Flag | Students | Dropout Rate | Lift vs Baseline | Statistical Test |
+|---|---|---|---|---|
+| **Zero Assessments** | 3,829 | **81.0%** | **+49.8pp** (2.60×) | Chi-square, p < 0.001 |
+| **Zero First-Week Activity** | 12,593 | **56.6%** | **+25.4pp** (1.81×) | Chi-square, p < 0.001 |
+| **Low Engagement (<10%)** | 8,234 | **48.1%** | **+16.9pp** (1.54×) | Mann-Whitney U, p < 0.001 |
+| **High Prior Attempts (≥3)** | 1,447 | **46.9%** | **+15.7pp** (1.50×) | Chi-square, p < 0.001 |
+| **Deprived Area (IMD 0-20%)** | 6,519 | **36.8%** | **+5.6pp** (1.18×) | Chi-square, p < 0.001 |
+
+**Cohort Baseline:** 31.2% dropout rate
+
+### SHAP-Rule Alignment
+
+All 5 rule-based flags correspond to features in the LightGBM model's SHAP importance ranking:
+
+| Flag | SHAP Feature | Rank (out of 28) | SHAP Score |
+|---|---|---|---|
+| Zero Assessments | `num_assessments` | **#1** | 2.557 |
+| Low Engagement | `engagement_ratio` | **#4** | 0.359 |
+| Zero Week-1 Activity | `first_week_pct` | #16 | 0.104 |
+| High Prior Attempts | `numOfPrevAttempts` | #18 | 0.093 |
+| Deprived Area | `imdBand_enc` | #24 | 0.061 |
+
+This convergence validates that the rules are not post-hoc rationalizations — they capture the same behavioral signals the model learned independently.
+
+---
+
+## 🔬 Model Comparison
+
+| Model | AUC-ROC | Accuracy | Precision | Recall | F1-Score |
+|---|---|---|---|---|---|
+| **LightGBM** ⭐ | **0.9412** | **88.4%** | **79.8%** | **80.2%** | **0.7984** |
+| XGBoost | 0.9401 | 88.3% | 79.4% | 80.3% | 0.7976 |
+| Random Forest | 0.9283 | 87.1% | 75.2% | 78.9% | 0.7691 |
+| Logistic Regression | 0.8847 | 83.6% | 68.3% | 71.4% | 0.6972 |
+
+LightGBM selected as final model for best balance of AUC-ROC, F1-score, and computational efficiency.
+
+---
+
+## 👥 Student Clustering (K=4)
+
+| Cluster | Students | Dropout Rate | Avg VLE Clicks | Avg Score | Characteristics |
+|---|---|---|---|---|
+| **Power Users** | 8,234 | **5.2%** | 12,847 | 81.3 | High engagement, high performance |
+| **Steady Completers** | 10,156 | **18.9%** | 6,423 | 72.1 | Moderate engagement, consistent |
+| **Struggling Engagers** | 8,567 | **42.3%** | 3,891 | 58.4 | Active but low performance |
+| **Non-Starters** | 5,636 | **71.8%** | 1,204 | 42.7 | Minimal engagement, high dropout |
+
+Clustering validated by outcome differences (71.8% vs 5.2% dropout between extremes).
+
+---
+
+## 📚 Data Source
+
+**Open University Learning Analytics Dataset (OULAD)**  
+- Published: *Scientific Data* (2017)  
+- DOI: [10.1038/sdata.2017.171](https://www.nature.com/articles/sdata2017171)  
+- 32,593 student enrollments | 7 modules | 8.4M VLE events | 173,912 assessments
+
+Download: [OULAD on Analyse](https://analyse.kmi.open.ac.uk/open_dataset)
+
+---
+
+## 👨‍💻 Contributors
+
+**GWU Data Science Capstone 2026**
+- **Aditya Kanbargi** — MS Data Science, GWU  
+  *Classification modeling, ML pipeline, dashboard development*
+- **Sanjana Kadambe Muralidhar** — MS Data Science, GWU  
+  *Feature engineering, clustering, early warning framework*
+
+---
+
+## 📄 License
+
+This project is for academic purposes as part of the GWU DATS 6501 Capstone course.  
+OULAD dataset is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+---
+
+## 🙏 Acknowledgments
+
+- Open University UK for releasing the OULAD dataset
+- Professor [Name] for guidance and feedback throughout the capstone
+- GWU Data Science program faculty and peers
