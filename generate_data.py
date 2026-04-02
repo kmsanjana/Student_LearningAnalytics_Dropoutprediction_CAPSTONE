@@ -19,7 +19,7 @@ print("="*65)
 print("  OULAD PHASE-2 DATA GENERATION")
 print("="*65)
 
-DB_URL = 'postgresql://postgres:23210415@localhost:5432/oulad'
+DB_URL = 'postgresql://postgres:Lock%40123@localhost:5432/OULAD'
 engine = create_engine(DB_URL)
 
 os.makedirs('processed', exist_ok=True)

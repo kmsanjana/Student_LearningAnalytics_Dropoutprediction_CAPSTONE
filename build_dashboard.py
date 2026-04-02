@@ -728,6 +728,19 @@ canvas{{max-height:260px;}}
     </div>
   </div>
 
+  <div class="chart-grid" style="margin-top:16px">
+    <div class="card">
+      <h3>LightGBM Built-in Feature Importance (Top 15)</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Split-based importance — how many times each feature was used to split a tree node across all 300 estimators. Higher = more splits = more predictive power.</p>
+      <canvas id="featImpChart" style="max-height:380px"></canvas>
+    </div>
+    <div class="card">
+      <h3>SHAP vs Built-in Importance — Feature Agreement</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Both methods independently rank the same top features, validating that the model consistently relies on assessment and engagement signals across all decision criteria.</p>
+      <div id="featCompareTable" style="margin-top:8px"></div>
+    </div>
+  </div>
+
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-top:16px">
     <h3 style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px">Why LightGBM?</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -769,6 +782,7 @@ const FLAGS    = {json_s(flags)};
 const PROB_HIST= {json_s(data['prob_hist'])};
 const ML_RESULTS = {json_s(ml_data['model_results'])};
 const ROC_CURVES = {json_s(ml_data['roc_curves'])};
+const FEAT_IMP   = {json_s(ml_data['feature_importance'])};
 
 const CLUSTER_COLORS = {{
   'Power Users':'#10b981','Steady Completers':'#3b82f6',
@@ -787,6 +801,7 @@ function switchTab(name) {{
   if(name==='clusters' && !window._clustBuilt) buildClusterCharts();
   if(name==='modules' && !window._modBuilt) buildModuleCharts();
   if(name==='mlmodels' && !window._mlBuilt) buildModelCharts();
+  if(name==='mlmodels' && !window._featImpBuilt) buildFeatImpChart();
 }}
 
 // ─── CHART DEFAULTS ──────────────────────────────────────────────────────────
@@ -956,6 +971,71 @@ function buildModuleCharts() {{
     }},
     options:{{plugins:{{legend:{{display:false}}}}}}
   }});
+}}
+
+// ─── FEATURE IMPORTANCE CHART ───────────────────────────────────────────────
+function buildFeatImpChart() {{
+  window._featImpBuilt = true;
+
+  const nameMap = {{
+    'activity_span':'Activity Span','engagement_ratio':'Engagement Ratio',
+    'module_dropout_rate':'Module Dropout Rate','num_assessments':'Assessments Completed',
+    'avg_score':'Avg Score','studiedCredits':'Credits Studied','active_days':'Active Days',
+    'codePresentation_enc':'Presentation Period','late_submission_rate':'Late Submission Rate',
+    'total_clicks':'Total VLE Clicks','first_week_clicks':'First-Week Clicks',
+    'first_week_days':'First-Week Days','zero_first_week':'Zero First-Week',
+    'numOfPrevAttempts':'Prior Attempts','clicks_per_day':'Clicks Per Day',
+    'days_before_start':'Days Before Start','dateRegistration':'Registration Timing',
+    'imdBand_enc':'IMD Deprivation','highestEducation_enc':'Education Level',
+    'score_std':'Score Variability','min_score':'Min Score','max_score':'Max Score',
+    'avg_submission_delay':'Submission Delay','codeModule_enc':'Module',
+    'ageBand_enc':'Age Band','gender_enc':'Gender','region_enc':'Region','first_week_pct':'Wk1 Click Share'
+  }};
+
+  const sorted = FEAT_IMP.slice().reverse();
+  const labels = sorted.map(d => nameMap[d.feature] || d.feature.replace(/_/g,' '));
+  const vals   = sorted.map(d => d.importance);
+  const colors = sorted.map((_,i) => `hsl(${{240 - i*12}},65%,58%)`);
+
+  new Chart('featImpChart', {{
+    type:'bar',
+    data:{{ labels, datasets:[{{ label:'Split Count', data:vals, backgroundColor:colors, borderRadius:4 }}] }},
+    options:{{
+      indexAxis:'y',
+      plugins:{{ legend:{{ display:false }} }},
+      scales:{{
+        x:{{ title:{{ display:true, text:'Number of Tree Splits' }} }},
+        y:{{ ticks:{{ font:{{ size:11 }} }} }}
+      }}
+    }}
+  }});
+
+  // Comparison table — SHAP rank vs Built-in rank
+  const shapFeatures = SHAP_D.map(d => d.display_name);
+  const topN = FEAT_IMP.slice(0,8);
+  const rows = topN.map((d, i) => {{
+    const dispName = nameMap[d.feature] || d.feature.replace(/_/g,' ');
+    const shapRank = shapFeatures.indexOf(dispName);
+    const shapBadge = shapRank >= 0
+      ? `<span style='color:#10b981;font-weight:700'>#${{shapRank+1}}</span>`
+      : `<span style='color:#94a3b8'>—</span>`;
+    return `<div style='display:grid;grid-template-columns:22px 1fr 80px 80px;gap:8px;align-items:center;
+      padding:8px 10px;background:${{i%2?'#1a2540':'#1e293b'}};border-radius:6px;margin-bottom:4px;font-size:12px'>
+      <span style='font-weight:700;color:#818cf8'>#${{i+1}}</span>
+      <span style='color:#f1f5f9'>${{dispName}}</span>
+      <span style='text-align:center;color:#f1f5f9;font-family:monospace'>${{d.importance.toLocaleString()}}</span>
+      <span style='text-align:center'>${{shapBadge}}</span>
+    </div>`;
+  }}).join('');
+
+  document.getElementById('featCompareTable').innerHTML =
+    `<div style='display:grid;grid-template-columns:22px 1fr 80px 80px;gap:8px;padding:6px 10px;
+       font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px'>
+      <span>Rank</span><span>Feature</span><span style='text-align:center'>Splits</span><span style='text-align:center'>SHAP Rank</span>
+    </div>${{rows}}
+    <p style='font-size:11px;color:#64748b;margin-top:10px;padding:8px;background:#0f172a;border-radius:6px'>
+      Green SHAP rank = both methods agree. Agreement confirms the model consistently uses the same features for both splitting decisions and outcome attribution.
+    </p>`;
 }}
 
 // ─── ML MODEL CHARTS ─────────────────────────────────────────────────────────

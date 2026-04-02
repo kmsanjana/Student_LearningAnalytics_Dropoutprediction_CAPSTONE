@@ -175,6 +175,9 @@ for i in sample_idx:
 print(f"  Scatter points: {len(scatter_data)}")
 
 # ── Save everything ──────────────────────────────────────────────────────────
+feat_imp_data = feat_imp.head(15)[['feature','importance']].to_dict('records')
+feat_imp_data = [{'feature': r['feature'], 'importance': int(r['importance'])} for r in feat_imp_data]
+
 model_data = {
     'model_results': results,
     'roc_curves': roc_curves,
@@ -185,6 +188,7 @@ model_data = {
     'n_features': len(feature_cols),
     'cluster_scatter': scatter_data,
     'pca_explained': [round(float(e), 4) for e in explained],
+    'feature_importance': feat_imp_data,
 }
 
 with open('processed/model_results.json', 'w') as f:
