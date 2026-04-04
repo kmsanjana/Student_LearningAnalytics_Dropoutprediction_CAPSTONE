@@ -43,37 +43,44 @@ The dashboard provides:
 ### Overview Tab
 *Main landing page with key performance indicators and cohort-level insights*
 
-![Overview Tab](screenshots/overview_tab.png)
+<img width="1909" height="487" alt="image" src="https://github.com/user-attachments/assets/f957ecbb-6b35-447e-9474-96a8d98eced2" />
+
 
 ### ML Models Tab
 *Model comparison, ROC curves, and LightGBM feature importance analysis*
 
-![ML Models Tab](screenshots/ml_models_tab.png)
+<img width="1914" height="852" alt="image" src="https://github.com/user-attachments/assets/daf399dc-f845-412c-9523-86220d2ad290" />
+
 
 ### Students Tab
 *Interactive table of high-risk students with detailed SHAP explanations*
 
-![Students Tab](screenshots/students_tab.png)
+<img width="1915" height="641" alt="image" src="https://github.com/user-attachments/assets/243ca56a-9216-4204-b6b7-a81f39877167" />
+
 
 ### Risk Flags Tab
 *Statistical validation of early warning indicators and dual-layer architecture*
 
-![Risk Flags Tab](screenshots/risk_flags_tab.png)
+<img width="1917" height="859" alt="image" src="https://github.com/user-attachments/assets/e399e342-6e26-45b0-b5ff-73134a5001b6" />
+
 
 ### SHAP Explainability Tab
 *Global feature importance and model interpretability analysis*
 
-![SHAP Tab](screenshots/shap_tab.png)
+<img width="1896" height="629" alt="image" src="https://github.com/user-attachments/assets/db3fed09-9eef-4640-9af6-d093f4da6342" />
+
 
 ### Clusters Tab
 *Student behavioral segmentation and intervention strategies*
 
-![Clusters Tab](screenshots/clusters_tab.png)
+<img width="1910" height="728" alt="image" src="https://github.com/user-attachments/assets/82b0451d-51c3-4f38-bc91-a0a3e5cc5700" />
+
 
 ### Modules Tab
 *Course-level dropout analysis and risk concentration*
 
-![Modules Tab](screenshots/modules_tab.png)
+<img width="1912" height="440" alt="image" src="https://github.com/user-attachments/assets/51cf9b9d-6a75-4b8c-85ce-bc1b1cba7aed" />
+
 
 ### Student Detail View
 *Individual student risk profile with SHAP waterfall explanation*
