@@ -82,11 +82,6 @@ The dashboard provides:
 <img width="1912" height="440" alt="image" src="https://github.com/user-attachments/assets/51cf9b9d-6a75-4b8c-85ce-bc1b1cba7aed" />
 
 
-### Student Detail View
-*Individual student risk profile with SHAP waterfall explanation*
-
-![Student Detail](screenshots/student_detail.png)
-
 ---
 
 ## 🚀 Quick Start
